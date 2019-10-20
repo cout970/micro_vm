@@ -114,8 +114,8 @@ pub enum ParsedInst {
     Nop,
     Exit,
     Jump { label: String },
-    If,
-    Unless,
+    Then,
+    Otherwise,
     SetByte { dst: u32, val: u8 },
     SetShort { dst: u32, val: u16 },
     Push { src: u32 },
@@ -135,6 +135,7 @@ pub enum ParsedInst {
     Return,
     Call { label: String },
     Mov { dst: u32, src: u32 },
+    Debug { src: u32, mode: u32 },
 }
 
 impl<'a> Parser<'a> {
@@ -168,22 +169,14 @@ impl<'a> Parser<'a> {
         let name = self.consume_id()?;
 
         match name.as_ref() {
-            "mov" => {
-                let arg1 = self.parse_reg()?;
-                self.consume(Comma)?;
-                let arg2 = self.parse_reg()?;
-                inst.push(ParsedInst::Mov { dst: arg1, src: arg2 })
+            "nop" => inst.push(ParsedInst::Nop),
+            "exit" => inst.push(ParsedInst::Exit),
+            "jmp" => {
+                let arg1 = self.consume_id()?;
+                inst.push(ParsedInst::Jump { label: arg1 });
             }
-            "add" => {
-                let arg1 = self.parse_reg()?;
-                self.consume(Comma)?;
-                let arg2 = self.parse_reg()?;
-                inst.push(ParsedInst::Add { dst: arg1, src: arg2 })
-            }
-            "neg" => {
-                let arg1 = self.parse_reg()?;
-                inst.push(ParsedInst::Neg { dst: arg1 })
-            }
+            "then" => inst.push(ParsedInst::Then),
+            "else" => inst.push(ParsedInst::Otherwise),
             "set" => {
                 let arg1 = self.parse_reg()?;
                 self.consume(Comma)?;
@@ -195,10 +188,78 @@ impl<'a> Parser<'a> {
                     inst.push(ParsedInst::SetByte { dst: arg1, val: arg2 as u8 });
                 }
             }
-            "jmp" => {
-                let arg1 = self.consume_id()?;
-
-                inst.push(ParsedInst::Jump { label: arg1 });
+            "push" => {
+                let arg1 = self.parse_reg()?;
+                inst.push(ParsedInst::Push { src: arg1 })
+            }
+            "pop" => {
+                let arg1 = self.parse_reg()?;
+                inst.push(ParsedInst::Pop { dst: arg1 })
+            }
+            "add" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::Add { dst: arg1, src: arg2 })
+            }
+            "sub" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::Sub { dst: arg1, src: arg2 })
+            }
+            "mul" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::Mul { dst: arg1, src: arg2 })
+            }
+            "div" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::Div { dst: arg1, src: arg2 })
+            }
+            "mod" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::Mod { dst: arg1, src: arg2 })
+            }
+            "neg" => {
+                let arg1 = self.parse_reg()?;
+                inst.push(ParsedInst::Neg { dst: arg1 })
+            }
+            "gt" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::GreaterThan { left: arg1, right: arg2 })
+            }
+            "lt" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::LessThan { left: arg1, right: arg2 })
+            }
+            "ge" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::GreaterEqual { left: arg1, right: arg2 })
+            }
+            "le" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::LessEqual { left: arg1, right: arg2 })
+            }
+            "eq" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::Equal { left: arg1, right: arg2 })
+            }
+            "neq" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::NotEqual { left: arg1, right: arg2 })
+            }
+            "ret" => {
+                inst.push(ParsedInst::Return)
+            }
+            "call" => {
+                let label = self.consume_id()?;
+                inst.push(ParsedInst::Call { label })
+            }
+            "mov" => {
+                let (arg1, arg2) = self.parse_2reg()?;
+                inst.push(ParsedInst::Mov { dst: arg1, src: arg2 })
+            }
+            "dbg" => {
+                let arg1 = self.parse_reg()?;
+                self.consume(Comma)?;
+                let mode = self.consume_int()? as u32;
+                inst.push(ParsedInst::Debug { src: arg1, mode })
             }
             _ => {
                 if self.expect(Colon).is_ok() {
@@ -218,24 +279,32 @@ impl<'a> Parser<'a> {
     fn parse_reg(&mut self) -> Result<u32, String> {
         let text = self.consume_id()?;
         match text.as_ref() {
-            "z" => Ok(0),
-            "a" => Ok(1),
-            "b" => Ok(2),
-            "c" => Ok(3),
-            "d" => Ok(4),
-            "e" => Ok(5),
-            "f" => Ok(6),
-            "g" => Ok(7),
-            "h" => Ok(8),
-            "i" => Ok(9),
-            "j" => Ok(10),
-            "k" => Ok(11),
-            "l" => Ok(12),
-            "m" => Ok(13),
-            "ret" => Ok(14),
+            "zero" | "z" => Ok(0),
+            "$0" | "a" => Ok(1),
+            "$1" | "b" => Ok(2),
+            "$2" | "c" => Ok(3),
+            "$3" | "d" => Ok(4),
+            "$4" | "e" => Ok(5),
+            "$5" | "f" => Ok(6),
+            "$6" | "g" => Ok(7),
+            "$7" | "h" => Ok(8),
+            "$8" | "i" => Ok(9),
+            "$9" | "j" => Ok(10),
+            "$10" | "k" => Ok(11),
+            "$11" | "l" => Ok(12),
+            "$12" | "m" => Ok(13),
+            "at" => Ok(14),
             "sp" => Ok(15),
             _ => Err(format!("Expected register name, found {:?}", text))
         }
+    }
+
+    fn parse_2reg(&mut self) -> Result<(u32, u32), String> {
+        let arg1 = self.parse_reg()?;
+        self.consume(Comma)?;
+        let arg2 = self.parse_reg()?;
+
+        Ok((arg1, arg2))
     }
 
     fn consume_int(&mut self) -> Result<i32, String> {
@@ -276,9 +345,9 @@ impl<'a> Parser<'a> {
     }
 
     fn expect(&self, ty: TokenType) -> Result<(), String> {
-        let Token(token_type, ..) = self.tk(self.pos);
+        let Token(token_type, span) = self.tk(self.pos);
         if token_type != &ty {
-            Err(format!("Expected {:?} but found {:?}", ty, token_type))
+            Err(format!("Expected {:?} but found {:?} at {:?}", ty, token_type, span))
         } else {
             Ok(())
         }
@@ -319,7 +388,57 @@ impl Compiler {
         }
     }
 
-    pub fn precompile(&mut self, insts: &Vec<ParsedInst>) -> Result<Vec<PrecompiledInst>, String> {
+    pub fn compile(&mut self, insts: &Vec<ParsedInst>) -> Result<Vec<u8>, String> {
+        let mut asm = Vec::new();
+        self.precompile(insts);
+
+        for inst in &self.buffer {
+            match inst {
+                PrecompiledInst::JumpPlaceHolder(label, pos) => {
+                    let target = *self.symbol_table.get(label)
+                        .ok_or_else(|| format!("Jump to invalid label: {:?}", label))?;
+                    let diff = (target as isize) - (*pos as isize);
+
+                    if diff > 0 {
+                        asm.push(Inst::JumpFw as u8);
+                    } else {
+                        asm.push(Inst::JumpBw as u8);
+                    }
+                    asm.push(diff as u8);
+                }
+                PrecompiledInst::CallPlaceHolder(label) => {
+                    let target = *self.symbol_table.get(label)
+                        .ok_or_else(|| format!("Call to invalid label: {:?}", label))?;
+
+                    asm.push(Inst::Call as u8);
+                    asm.push((target >> 8) as u8);
+                    asm.push(target as u8);
+                }
+                PrecompiledInst::Compiled1(i) => {
+                    asm.push(*i as u8);
+                }
+                PrecompiledInst::Compiled2(i, a) => {
+                    asm.push(*i as u8);
+                    asm.push(*a as u8);
+                }
+                PrecompiledInst::Compiled3(i, a, b) => {
+                    asm.push(*i as u8);
+                    asm.push(*a as u8);
+                    asm.push(*b as u8);
+                }
+                PrecompiledInst::Compiled4(i, a, b, c) => {
+                    asm.push(*i as u8);
+                    asm.push(*a as u8);
+                    asm.push(*b as u8);
+                    asm.push(*c as u8);
+                }
+            }
+        }
+
+        Ok(asm)
+    }
+
+    fn precompile(&mut self, insts: &Vec<ParsedInst>) -> Result<Vec<PrecompiledInst>, String> {
         for inst in insts {
             match inst {
                 ParsedInst::Label { label } => { self.symbol_table.insert(label.clone(), self.pos); }
@@ -329,8 +448,8 @@ impl Compiler {
                     self.buffer.push(PrecompiledInst::JumpPlaceHolder(label.clone(), self.pos));
                     self.pos += 2;
                 }
-                ParsedInst::If => self.inst_1(Inst::If),
-                ParsedInst::Unless => self.inst_1(Inst::Unless),
+                ParsedInst::Then => self.inst_1(Inst::Then),
+                ParsedInst::Otherwise => self.inst_1(Inst::Otherwise),
                 ParsedInst::SetByte { dst, val } => self.inst_3(Inst::SetByte, *dst as u8, *val),
                 ParsedInst::SetShort { dst, val } => self.inst_4(Inst::SetShort, *dst as u8, (*val >> 8) as u8, *val as u8),
                 ParsedInst::Push { src } => self.inst_2(Inst::Push, *src as u8),
@@ -353,6 +472,7 @@ impl Compiler {
                     self.pos += 3;
                 }
                 ParsedInst::Mov { dst, src } => self.inst_3(Inst::Mov, *dst as u8, *src as u8),
+                ParsedInst::Debug { src, mode } => self.inst_3(Inst::Debug, *src as u8, *mode as u8),
             }
         }
 
@@ -380,24 +500,3 @@ impl Compiler {
         self.pos += 4;
     }
 }
-
-// neg a
-// add a, b
-// set a, 0xFF
-// set a, 0xFFFF
-// jmp a, -3
-// jmp a, 3
-// ret
-// nop
-// die
-// if
-// unl
-// push a
-// pop  b
-// mov a b
-// eq a b
-// ne a b
-// gt a b
-// lt a b
-// ge a b
-// le a b

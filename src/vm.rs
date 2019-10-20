@@ -1,4 +1,5 @@
 use std::intrinsics::transmute;
+use std::ops::Add;
 
 pub struct VM {
     registers: [u16; 16],
@@ -14,8 +15,8 @@ pub enum Inst {
     Exit,
     JumpFw,
     JumpBw,
-    If,
-    Unless,
+    Then,
+    Otherwise,
     SetByte,
     SetShort,
     Push,
@@ -35,35 +36,38 @@ pub enum Inst {
     Return,
     Call,
     Mov,
+    Debug,
 }
 
 const SP_REGISTER: usize = 15;
-const INSTRUCTION_LEN: [u16; 25] = [
+const AT_REGISTER: usize = 14;
+const INSTRUCTION_LEN: [u16; 26] = [
     1, // Nop
     1, // Exit
     2, // JumpFw
     2, // JumpBw
-    1, // If
-    1, // Unless
+    1, // Then
+    1, // Otherwise
     3, // SetByte
     4, // SetShort
     2, // Push
     2, // Pop
-    2, // Add
-    2, // Sub
-    2, // Mul
-    2, // Div
-    2, // Mod
-    1, // Neg
-    2, // GreaterThan
-    2, // LessThan
-    2, // GreaterEqual
-    2, // LessEqual
-    2, // Equal
-    2, // NotEqual
+    3, // Add
+    3, // Sub
+    3, // Mul
+    3, // Div
+    3, // Mod
+    2, // Neg
+    3, // GreaterThan
+    3, // LessThan
+    3, // GreaterEqual
+    3, // LessEqual
+    3, // Equal
+    3, // NotEqual
     1, // Return
-    2, // Call
-    3  // Mov
+    3, // Call
+    3, // Mov
+    3  // Debug
 ];
 
 impl VM {
@@ -90,22 +94,24 @@ impl VM {
         loop {
             let inst = self.ram[self.pc as usize];
             self.pc += 1;
-            match unsafe { transmute::<u8, Inst>(inst) } {
+            let inst_parsed = unsafe { transmute::<u8, Inst>(inst) };
+//            println!("{:?}", inst_parsed); // DEBUG
+            match inst_parsed {
                 Inst::Nop => {}
                 Inst::Exit => { return; }
                 Inst::JumpFw => {
                     self.pc += self.ram[self.pc as usize] as u16 + 1;
                 }
                 Inst::JumpBw => {
-                    self.pc -= self.ram[self.pc as usize] as u16 + 1;
+                    self.pc = ((self.pc as i16) + (self.ram[self.pc as usize] as i8) as i16 - 1i16) as u16;
                 }
-                Inst::If => {
-                    if self.skip_flag {
+                Inst::Then => {
+                    if !self.skip_flag {
                         self.pc += INSTRUCTION_LEN[self.ram[self.pc as usize] as usize];
                     }
                 }
-                Inst::Unless => {
-                    if !self.skip_flag {
+                Inst::Otherwise => {
+                    if self.skip_flag {
                         self.pc += INSTRUCTION_LEN[self.ram[self.pc as usize] as usize];
                     }
                 }
@@ -120,8 +126,8 @@ impl VM {
                 }
                 Inst::SetShort => {
                     let reg = self.ram[self.pc as usize];
-                    let low_bytes = self.ram[(self.pc + 1) as usize] as u16;
-                    let high_bytes = self.ram[(self.pc + 2) as usize] as u16;
+                    let low_bytes = self.ram[(self.pc + 2) as usize] as u16;
+                    let high_bytes = self.ram[(self.pc + 1) as usize] as u16;
 
                     if reg != 0 {
                         self.registers[reg as usize] = (high_bytes << 8) | low_bytes;
@@ -133,8 +139,8 @@ impl VM {
                     self.registers[SP_REGISTER] -= 2;
 
                     let reg = self.ram[self.pc as usize];
-                    self.ram[sp as usize] = self.registers[reg as usize] as u8;
-                    self.ram[(sp + 1) as usize] = (self.registers[reg as usize] >> 8) as u8;
+                    self.ram[(sp + 1) as usize] = self.registers[reg as usize] as u8;
+                    self.ram[sp as usize] = (self.registers[reg as usize] >> 8) as u8;
                     self.pc += 1;
                 }
                 Inst::Pop => {
@@ -143,8 +149,8 @@ impl VM {
 
                     let reg = self.ram[self.pc as usize];
                     if reg != 0 {
-                        self.registers[reg as usize] = self.ram[sp as usize] as u16;
-                        self.registers[reg as usize] |= (self.ram[(sp + 1) as usize] as u16) << 8;
+                        self.registers[reg as usize] = self.ram[(sp + 1) as usize] as u16;
+                        self.registers[reg as usize] |= (self.ram[sp as usize] as u16) << 8;
                     }
                     self.pc += 1;
                 }
@@ -152,28 +158,39 @@ impl VM {
                     let a = self.ram[self.pc as usize];
                     let b = self.ram[(self.pc + 1) as usize];
 
-                    self.registers[a as usize] = ((self.registers[a as usize] as i16) + (self.registers[b as usize] as i16)) as u16;
+                    if a != 0 {
+                        let x = self.registers[a as usize] as i16;
+                        let y = self.registers[b as usize] as i16;
+                        self.registers[a as usize] = x.wrapping_add(y) as u16;
+                    }
                     self.pc += 2;
                 }
                 Inst::Sub => {
                     let a = self.ram[self.pc as usize];
                     let b = self.ram[(self.pc + 1) as usize];
 
-                    self.registers[a as usize] = ((self.registers[a as usize] as i16) - (self.registers[b as usize] as i16)) as u16;
+                    if a != 0 {
+                        let x = self.registers[a as usize] as i16;
+                        let y = self.registers[b as usize] as i16;
+                        self.registers[a as usize] = x.wrapping_sub(y) as u16;
+                        ;
+                    }
                     self.pc += 2;
                 }
                 Inst::Mul => {
                     let a = self.ram[self.pc as usize];
                     let b = self.ram[(self.pc + 1) as usize];
 
-                    self.registers[a as usize] = ((self.registers[a as usize] as i16) * (self.registers[b as usize] as i16)) as u16;
+                    if a != 0 {
+                        self.registers[a as usize] = ((self.registers[a as usize] as i16) * (self.registers[b as usize] as i16)) as u16;
+                    }
                     self.pc += 2;
                 }
                 Inst::Div => {
                     let a = self.ram[self.pc as usize];
                     let b = self.ram[(self.pc + 1) as usize];
 
-                    if self.registers[b as usize] != 0 {
+                    if self.registers[b as usize] != 0 && a != 0 {
                         self.registers[a as usize] = ((self.registers[a as usize] as i16) / (self.registers[b as usize] as i16)) as u16;
                     }
                     self.pc += 2;
@@ -182,14 +199,16 @@ impl VM {
                     let a = self.ram[self.pc as usize];
                     let b = self.ram[(self.pc + 1) as usize];
 
-                    if self.registers[b as usize] != 0 {
+                    if self.registers[b as usize] != 0 && a != 0 {
                         self.registers[a as usize] = ((self.registers[a as usize] as i16) % (self.registers[b as usize] as i16)) as u16;
                     }
                     self.pc += 2;
                 }
                 Inst::Neg => {
                     let reg = self.ram[self.pc as usize];
-                    self.registers[reg as usize] = (-(self.registers[reg as usize] as i16)) as u16;
+                    if reg != 0 {
+                        self.registers[reg as usize] = (-(self.registers[reg as usize] as i16)) as u16;
+                    }
                     self.pc += 1;
                 }
                 Inst::GreaterThan => {
@@ -234,9 +253,59 @@ impl VM {
                     self.skip_flag = self.registers[a as usize] != self.registers[b as usize];
                     self.pc += 2;
                 }
-                Inst::Return => {}
-                Inst::Call => {}
-                Inst::Mov => {}
+                Inst::Return => {
+                    self.registers[SP_REGISTER] += 2;
+                    let sp = self.registers[SP_REGISTER];
+
+                    self.registers[AT_REGISTER] = self.ram[(sp + 1) as usize] as u16;
+                    self.registers[AT_REGISTER] |= (self.ram[sp as usize] as u16) << 8;
+
+                    self.pc = self.registers[AT_REGISTER];
+                }
+                Inst::Call => {
+                    let low_bytes = self.ram[(self.pc + 1) as usize] as u16;
+                    let high_bytes = self.ram[(self.pc) as usize] as u16;
+                    self.pc += 2;
+
+                    // Store return addr
+                    let sp = self.registers[SP_REGISTER];
+                    self.registers[SP_REGISTER] -= 2;
+
+                    self.ram[(sp + 1) as usize] = self.pc as u8;
+                    self.ram[sp as usize] = (self.pc >> 8) as u8;
+
+                    // Jump to subroutine
+                    self.pc = (high_bytes << 8) | low_bytes;
+                }
+                Inst::Mov => {
+                    let a = self.ram[self.pc as usize];
+                    let b = self.ram[(self.pc + 1) as usize];
+
+                    if a != 0 {
+                        self.registers[a as usize] = self.registers[b as usize];
+                    }
+                    self.pc += 2;
+                }
+                Inst::Debug => {
+                    let a = self.ram[self.pc as usize];
+                    let b = self.ram[(self.pc + 1) as usize];
+
+                    match b {
+                        0 => println!("{}", self.registers[a as usize]),
+                        1 => println!("{:x}", self.registers[a as usize]),
+                        2 => println!("{:05}", self.registers[a as usize]),
+                        3 => println!("{:04X}", self.registers[a as usize]),
+                        4 => println!("0x{:04X}", self.registers[a as usize]),
+                        10 => print!("{}", self.registers[a as usize]),
+                        11 => print!("{:x}", self.registers[a as usize]),
+                        12 => print!("{:05}", self.registers[a as usize]),
+                        13 => print!("{:04X}", self.registers[a as usize]),
+                        14 => print!("0x{:04X}", self.registers[a as usize]),
+                        _ => self.print(),
+                    }
+
+                    self.pc += 2;
+                }
                 _ => {
                     panic!("Invalid instruction: {}", inst);
                 }
@@ -247,16 +316,35 @@ impl VM {
     pub fn print(&self) {
         print!("{{");
         print!("\n  pc: {}", self.pc);
-        print!("\n  ram: [");
-        for i in 0..16 {
-            print!("\n    {:3} (0x{:02X})", self.ram[i], self.ram[i]);
-        }
-        print!("\n  ]");
+        print!("\n  ram: [\n");
+        self.disassembly();
+        print!("  ]");
         print!("\n  registers: [");
         for i in 0..16 {
             print!("\n    {:4} (0x{:04X})", self.registers[i], self.registers[i]);
         }
         print!("\n  ]");
         print!("\n}}");
+    }
+
+    pub fn disassembly(&self) {
+        let mut pos = 0;
+
+        while pos < self.ram.len() {
+            let byte = self.ram[pos];
+            let inst = unsafe { transmute::<u8, Inst>(byte) };
+            let len = INSTRUCTION_LEN[byte as usize];
+
+            print!("{:04X}  {:?}", pos, inst);
+            for i in 1..(len as usize) {
+                if pos + i >= self.ram.len() {
+                    continue;
+                }
+                print!(" {:02X}", self.ram[pos + i]);
+            }
+            println!();
+
+            pos += len as usize;
+        }
     }
 }

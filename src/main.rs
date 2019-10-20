@@ -2,6 +2,7 @@
 // cargo watch -c -q -s 'cargo +nightly rustc -- -Awarnings -Zno-codegen && cargo test'
 
 use crate::assembler::{ParsedInst, Parser, print_tokens, read_all_tokens, Compiler};
+use crate::vm::VM;
 
 mod vm;
 mod assembler;
@@ -9,29 +10,25 @@ mod assembler;
 fn main() {
     let bytes = include_bytes!("../sample.asm");
     let tokens = read_all_tokens(bytes);
-    print_tokens(bytes, &tokens);
+//    print_tokens(bytes, &tokens);
 
     let mut parser = Parser::new(bytes, tokens);
     let mut compiler = Compiler::new();
 
     let parsed = parser.parse().expect("Unable to parse");
 
-    let pre = compiler.precompile(&parsed).expect("Unable to compiled");
+    let pre = compiler.compile(&parsed).expect("Unable to compiled");
 
-    println!("{:#?}", pre);
-//    let mut vm = VM::new();
-//    vm.set(Inst::SetByte as u8);
-//    vm.set(0);
-//    vm.set(0xFF);
-//
-//    vm.set(Inst::Neg as u8);
-//    vm.set(0);
-//
-//    vm.set(Inst::Exit as u8);
-//    vm.reset();
-//
-//    vm.run();
-//    vm.print();
+//    println!("{:#?}", pre);
+
+    let mut vm = VM::new();
+
+    for byte in pre {
+        vm.set(byte);
+    }
+    vm.reset();
+
+    vm.run();
 }
 
 #[cfg(test)]
